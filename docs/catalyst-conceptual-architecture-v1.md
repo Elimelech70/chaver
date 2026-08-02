@@ -12,7 +12,7 @@ This document sets out the conceptual architecture underlying Catalyst — first
 
 > **Intelligence is not stored, it is resonant. It is not sequential, it is simultaneous. It is not hierarchical, it is distributed. It is not solitary, it is relational.**
 
-The architecture is theologically grounded. Cognition mirrors creation, and creation is field, resonance, and relationship. The body of Christ (1 Corinthians 12) is not a devotional metaphor here — it is a specification for distributed intelligence with jointed referral under shared headship. What follows is one attempt to translate that specification into silicon.
+The AI substrate needs to mirror the brain so thought as resonance can get closer to they way the brain Thinks and Does. 
 
 ---
 
@@ -24,7 +24,7 @@ Memory is not stored data. Memory is **standing wave patterns** on neural substr
 
 - Pattern completion is intrinsic. Any fragment sharing a shape's harmonic re-excites the full shape.
 - Fading is decoherence, not deletion. Shapes weaken by losing coherence, not by being erased.
-- Storage is distributed. No shape lives in one place; it lives in the ability of many places to ring together.
+- Storage is distributed. No shape lives in one place; it lives in many components that ring together through resonance.
 
 ### 2. The Entity
 
