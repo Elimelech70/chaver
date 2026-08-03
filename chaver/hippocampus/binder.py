@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from chaver.hippocampus import resonance
 from chaver.persistence import blob_to_vec, vec_to_blob
 
 
@@ -222,6 +223,150 @@ class Hippocampus:
             self.conn.commit()
 
         return top
+
+    # ---- Conjunctive recall (resonance-binding) ----------------------
+    #
+    # docs/resonance-binding-implementation-v1.md §5: the query a flat
+    # cosine store cannot do structurally — "which memory is from SOURCE
+    # x AND about topic y" — because that is a conjunction over bound
+    # roles, not a single stored key. recall() above is plain nearest-
+    # neighbour on content; this builds a role-bound structured vector
+    # per row on the fly (nothing new is persisted, no schema change)
+    # and ranks by similarity to a probe built the same way. Recency
+    # binds via fractional power encoding (§6) so nearness in time is
+    # baked into the geometry rather than a hard age cutoff.
+
+    def _structured_vector(
+        self, content_vec: np.ndarray, source: str, created_at: float
+    ) -> np.ndarray:
+        return resonance.bundle(
+            [
+                resonance.bind(
+                    resonance.hv("ROLE_CONTENT", self.dimension), content_vec
+                ),
+                resonance.bind(
+                    resonance.hv("ROLE_SOURCE", self.dimension),
+                    resonance.hv(f"SOURCE::{source}", self.dimension),
+                ),
+                resonance.bind(
+                    resonance.hv("ROLE_RECENCY", self.dimension),
+                    resonance.power(
+                        resonance.unitary_hv("TIME_BASE", self.dimension),
+                        created_at / 3600.0,
+                    ),
+                ),
+            ]
+        )
+
+    def recall_conjunctive(
+        self,
+        content_cue: np.ndarray | None = None,
+        source: str | None = None,
+        near_time: float | None = None,
+        top_k: int = 5,
+        include_cortical: bool = True,
+    ) -> list[RecallResult]:
+        """Recall by a conjunction of role-bound cues (content/source/time).
+
+        Unlike recall(), any subset of cues may be given. Each present cue
+        is bound to its role and the cues are bundled into one probe; each
+        candidate row's own (content, source, recency) is bound the same
+        way and ranked by cosine similarity to the probe. A row matching
+        more of the given cues scores higher than one matching fewer —
+        the conjunction a plain nearest-neighbour store cannot express.
+
+        Args:
+            content_cue: Optional content vector to match.
+            source: Optional source string to match.
+            near_time: Optional unix timestamp to match nearness to.
+            top_k: Maximum results to return.
+            include_cortical: Whether to also search consolidated memory.
+
+        Returns:
+            List of RecallResult, sorted by similarity descending.
+        """
+        parts = []
+        if content_cue is not None:
+            parts.append(
+                resonance.bind(
+                    resonance.hv("ROLE_CONTENT", self.dimension),
+                    content_cue.astype(np.float32),
+                )
+            )
+        if source is not None:
+            parts.append(
+                resonance.bind(
+                    resonance.hv("ROLE_SOURCE", self.dimension),
+                    resonance.hv(f"SOURCE::{source}", self.dimension),
+                )
+            )
+        if near_time is not None:
+            parts.append(
+                resonance.bind(
+                    resonance.hv("ROLE_RECENCY", self.dimension),
+                    resonance.power(
+                        resonance.unitary_hv("TIME_BASE", self.dimension),
+                        near_time / 3600.0,
+                    ),
+                )
+            )
+        if not parts:
+            raise ValueError("recall_conjunctive requires at least one cue")
+        probe = resonance.bundle(parts)
+
+        results: list[RecallResult] = []
+
+        cur = self.conn.execute(
+            "SELECT id, key, content, joint_vector, modalities, source, "
+            "created_at, consolidated_at, activation, meta FROM episodes"
+        )
+        for row in cur.fetchall():
+            vec = blob_to_vec(row[3])
+            if vec.shape != (self.dimension,):
+                continue
+            structured = self._structured_vector(vec, row[5], row[6])
+            score = resonance.sim(probe, structured)
+            episode = Episode(
+                id=row[0],
+                key=row[1],
+                content=row[2],
+                joint_vector=vec,
+                modalities=row[4].split(",") if row[4] else [],
+                source=row[5],
+                created_at=row[6],
+                consolidated_at=row[7],
+                activation=row[8],
+                meta=json.loads(row[9]) if row[9] else {},
+            )
+            results.append(RecallResult(episode, score, from_cortical=False))
+
+        if include_cortical:
+            cur = self.conn.execute(
+                "SELECT id, key, content, vector, source, created_at, meta "
+                "FROM cortical_text"
+            )
+            for row in cur.fetchall():
+                vec = blob_to_vec(row[3])
+                if vec.shape != (self.dimension,):
+                    continue
+                structured = self._structured_vector(vec, row[4], row[5])
+                score = resonance.sim(probe, structured)
+                episode = Episode(
+                    id=row[0],
+                    key=row[1],
+                    content=row[2],
+                    joint_vector=vec,
+                    modalities=["text"],
+                    source=row[4],
+                    created_at=row[5],
+                    consolidated_at=None,
+                    activation=0.5,
+                    meta=json.loads(row[6]) if row[6] else {},
+                )
+                results.append(RecallResult(episode, score, from_cortical=True))
+
+        results.sort(key=lambda r: r.similarity, reverse=True)
+        return results[:top_k]
 
     # ---- Consolidation ----------------------------------------------
 
