@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     created_at REAL NOT NULL,
     consolidated_at REAL,
     activation REAL NOT NULL DEFAULT 0.5,
+    strength REAL NOT NULL DEFAULT 1.0,
     meta TEXT
 );
 
@@ -59,6 +60,33 @@ def blob_to_vec(blob: bytes) -> np.ndarray:
     return np.frombuffer(blob, dtype=np.float32)
 
 
+def _column_names(conn: sqlite3.Connection, table: str) -> set[str]:
+    """The set of column names currently on a table."""
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in cur.fetchall()}
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Bring an existing db up to the current schema without data loss.
+
+    SQLite's CREATE TABLE IF NOT EXISTS never alters an already-present
+    table, so a db written before the learning column existed keeps its
+    old shape. This adds what's missing in place. Load-bearing for
+    continuity: Chaver's db is his continuous self — a schema change must
+    upgrade it, never require rebuilding it from newborn.
+
+    The `episodes.strength` column carries fruit-gated learning (a binding
+    that predicts well is reinforced; disuse decays it). Pre-existing
+    episodes default to strength 1.0 — treated as fully-standing until the
+    loop has a chance to sort them.
+    """
+    if "strength" not in _column_names(conn, "episodes"):
+        conn.execute(
+            "ALTER TABLE episodes ADD COLUMN strength REAL NOT NULL DEFAULT 1.0"
+        )
+    conn.commit()
+
+
 def open_db(path: Path) -> sqlite3.Connection:
     """Open (creating if needed) Chaver's memory database.
 
@@ -67,12 +95,13 @@ def open_db(path: Path) -> sqlite3.Connection:
             it does not exist.
 
     Returns:
-        A configured sqlite3.Connection with schema applied.
+        A configured sqlite3.Connection with schema applied and migrated.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.executescript(SCHEMA)
     conn.commit()
+    migrate(conn)
     return conn
 
 

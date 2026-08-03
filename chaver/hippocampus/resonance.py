@@ -108,3 +108,67 @@ def cleanup(
         if s > best_s:
             best, best_s = name, s
     return best, best_s
+
+
+# ---- Compatibility + hyperdimensional lift ---------------------------
+#
+# Folded in from the memory-and-learning core's reconstructed resonance
+# module when the two environments were merged. `cosine` is the name the
+# corpus and the learning proof use for `sim` (identical readout), kept as
+# an alias so either name resolves. `random_hv` and `HyperLift` belong to
+# the isolated 10,000-D proof path and are NOT used by the persisted 384-D
+# runtime (one vector space, one blob format — see the module docstring);
+# they live here so the single resonance module is complete for the day a
+# modality genuinely needs hyperdimensional width, rather than being lost
+# with the retired learning_core.
+
+cosine = sim  # corpus/proof name for the cosine readout
+
+
+def random_hv(dim: int, rng: np.random.Generator) -> np.ndarray:
+    """A random direction in dim-D space, drawn from the caller's rng.
+
+    Unlike hv() (name-keyed, content-addressed), this takes an explicit
+    numpy Generator — used where a locally-seeded per-role vector is wanted.
+    """
+    v = rng.standard_normal(dim).astype(np.float32)
+    return v / np.linalg.norm(v)
+
+
+class HyperLift:
+    """A frozen, seeded random projection from an embedder's native width
+    (embed_dim, e.g. 384) up into a shared hyperdimensional binding space
+    (bind_dim, e.g. 10,000).
+
+    An unlearned Gaussian projection scaled by 1/sqrt(embed_dim) (a
+    Johnson-Lindenstrauss construction) that approximately preserves
+    pairwise distances and near-orthogonality once lifted. Seeded and never
+    updated, so the same embed_dim vector lifts to the same bind_dim vector
+    across restarts with no training and no persistence of the matrix.
+
+    Not used by the current 384-D persisted path; retained for the point at
+    which a modality needs cleaner high-dimensional unbinding than 384-D
+    gives (see resonance module docstring on the near-orthogonality
+    tradeoff at 384-D).
+    """
+
+    def __init__(self, embed_dim: int, bind_dim: int, seed: int = 0) -> None:
+        self.embed_dim = embed_dim
+        self.bind_dim = bind_dim
+        rng = np.random.default_rng(seed)
+        self._matrix = (
+            rng.standard_normal((bind_dim, embed_dim)).astype(np.float32)
+            / np.sqrt(embed_dim)
+        )
+
+    def lift(self, vec: np.ndarray) -> np.ndarray:
+        v = np.asarray(vec, dtype=np.float32)
+        if v.shape != (self.embed_dim,):
+            raise ValueError(
+                f"HyperLift expected a {self.embed_dim}-dim vector, got {v.shape}"
+            )
+        lifted = self._matrix @ v
+        norm = np.linalg.norm(lifted)
+        if norm > 0:
+            lifted = lifted / norm
+        return lifted.astype(np.float32)
