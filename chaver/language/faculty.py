@@ -44,10 +44,13 @@ _DEFAULT_MODELS: dict[str, str] = {
     "ollama": "qwen3",
 }
 
-CHAVER_MODEL = os.environ.get(
-    "CHAVER_MODEL",
-    _DEFAULT_MODELS.get(CHAVER_BACKEND, ""),
-)
+if CHAVER_BACKEND not in _DEFAULT_MODELS:
+    known = ", ".join(_DEFAULT_MODELS)
+    raise ValueError(
+        f"Unknown CHAVER_BACKEND '{CHAVER_BACKEND}'. Known backends: {known}"
+    )
+
+CHAVER_MODEL = os.environ.get("CHAVER_MODEL", _DEFAULT_MODELS[CHAVER_BACKEND])
 
 
 # ── Request dataclass (shared across all backends) ───────────────────────────
