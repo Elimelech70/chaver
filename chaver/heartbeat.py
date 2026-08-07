@@ -18,6 +18,8 @@ v0.2 adds:
 from __future__ import annotations
 
 import asyncio
+import itertools
+import os
 import signal as os_signal
 import sys
 from pathlib import Path
@@ -28,8 +30,9 @@ from chaver.cognitive.behaviour import BehaviourModulator
 from chaver.cognitive.evaluation import Evaluation
 from chaver.cognitive.executive import Executive
 from chaver.cognitive.strategy import StrategyLayer
-from chaver.hippocampus.binder import Hippocampus
+from chaver.hippocampus.binder import Hippocampus, RecallResult
 from chaver.language.faculty import LanguageFaculty, LanguageRequest
+from chaver.net.telnet import serve_telnet
 from chaver.persistence import close_db, open_db
 from chaver.sensory.text_encoder import TextEncoder
 from chaver.state import ChaverState
@@ -38,6 +41,13 @@ from chaver.working_memory.ringing import WorkingMemory
 
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DB_NAME = "chaver.db"
+
+# Fruit-gated learning of the hippocampal index. A recalled memory whose
+# resonance with the live cue clears this bar bore fruit — predictive
+# recognition — and is reinforced so it survives the forget pass. Kept in
+# step with the memory-and-learning core's Evaluation.recognise_threshold.
+RECOGNITION_THRESHOLD = 0.35
+RECALL_REINFORCE_DELTA = 0.6
 
 
 async def wm_decay_task(state: ChaverState, tick_seconds: float = 1.0) -> None:
@@ -74,20 +84,48 @@ async def consolidation_task(
             print(f"[consolidation error] {exc}")
 
 
-def _excite_recall(state: ChaverState, cue_text: str, top_k: int = 4) -> int:
+async def forget_task(
+    state: ChaverState,
+    tick_seconds: float = 600.0,
+    decay: float = 0.02,
+    floor: float = 0.05,
+) -> None:
+    """Disuse-decay of the hippocampal index — the other half of learning.
+
+    Slowly weakens every unreinforced episodic binding and prunes the ones
+    that fade below the floor. Runs an order of magnitude slower than a
+    conversation turn, and never touches consolidated (cortical) memory, so
+    anything meaningful is reinforced or consolidated long before it can
+    decay out. What's left to prune is the index's accreted noise.
+    """
+    while state.running:
+        await asyncio.sleep(tick_seconds)
+        if state.hippocampus is None:
+            continue
+        try:
+            pruned = state.hippocampus.forget_pass(decay=decay, floor=floor)
+            if pruned > 0:
+                print(f"[forget] {pruned} unreinforced episode(s) pruned")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[forget error] {exc}")
+
+
+def _excite_recall(
+    state: ChaverState, cue_text: str, top_k: int = 4
+) -> list[RecallResult]:
     """Recall memories cued by text and excite them into working memory.
 
-    Returns the number of memories excited. Silently no-ops if the
+    Returns the recall hits (empty list on no-op). Silently no-ops if the
     hippocampus or encoder isn't ready yet.
     """
     if state.hippocampus is None or state.text_encoder is None:
-        return 0
+        return []
     try:
         cue_vec = state.text_encoder.encode(cue_text)
         results = state.hippocampus.recall(cue_vec, top_k=top_k)
     except Exception as exc:  # noqa: BLE001
         print(f"[recall error] {exc}")
-        return 0
+        return []
 
     for r in results:
         origin = "cortical" if r.from_cortical else "episodic"
@@ -102,73 +140,82 @@ def _excite_recall(state: ChaverState, cue_text: str, top_k: int = 4) -> int:
                 "episode_source": r.episode.source,
             },
         )
-    return len(results)
+    return results
 
 
-async def conversation_loop(
+def _reinforce_recognised(state: ChaverState, results: list[RecallResult]) -> None:
+    """Fruit: a recalled memory that resonated with the live cue is
+    reinforced so it survives disuse-decay. Silent — no language call.
+
+    Predictive recognition is the minimal fruit (per the memory-and-learning
+    core): cued by the incoming turn, memory completed to something that fits.
+    Only the episodic index is reinforced; cortical fragments are already
+    durable.
+    """
+    if state.hippocampus is None:
+        return
+    for r in results:
+        if r.similarity >= RECOGNITION_THRESHOLD:
+            try:
+                state.hippocampus.reinforce(r.episode.key, RECALL_REINFORCE_DELTA)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[reinforce error] {exc}")
+
+
+async def handle_turn(
     state: ChaverState,
     language: LanguageFaculty,
-) -> None:
-    """Stdin conversation with Chaver — each turn becomes memory.
+    user_text: str,
+    turn: int,
+    lock: asyncio.Lock,
+    speaker: str = "craig",
+) -> str:
+    """One conversational turn against Chaver's single mind, transport-agnostic.
+
+    Both the stdin loop and the telnet server call this, so a Craig at the
+    terminal and a Craig over telnet talk to the *same* Chaver — one working
+    memory, one hippocampus. The lock serialises turns so two transports
+    can't interleave a generation and scramble the ringing set.
 
     Flow per turn:
-      1. Craig speaks → text encoded.
-      2. Hippocampus recalls memories resonant with the cue.
-      3. Recalled memories excited in working memory.
+      1. Speaker's words → excited in WM, text encoded.
+      2. Hippocampus recalls resonant memories; those that recognise the
+         cue are reinforced (fruit), and all are excited in WM.
+      3. Speaker's turn persisted as an episode immediately.
       4. Language faculty called with full WM context.
-      5. Response encoded, bound, stored as new episode.
-      6. Both Craig's turn and Chaver's response persist as memory.
+      5. Response excited, encoded, bound, persisted.
+    Returns Chaver's reply.
     """
-    print("\n[Speak with Chaver. Empty line + Enter to send. Ctrl+C to end.]\n")
-
-    loop = asyncio.get_running_loop()
-    turn = 0
-
-    while state.running:
-        try:
-            user_line = await loop.run_in_executor(None, sys.stdin.readline)
-        except (EOFError, KeyboardInterrupt):
-            state.running = False
-            break
-
-        if not user_line:
-            await asyncio.sleep(0.1)
-            continue
-
-        user_text = user_line.strip()
-        if not user_text:
-            continue
-
-        turn += 1
-
-        # Excite Craig's turn in WM.
+    async with lock:
         state.working_memory.excite(
-            key=f"craig:turn:{turn}",
+            key=f"{speaker}:turn:{turn}",
             content=user_text,
-            source="craig",
+            source=speaker,
             strength=0.95,
         )
 
-        # Recall memories cued by Craig's words.
+        # Recall memories cued by the incoming words; reinforce the ones
+        # that resonated (predictive recognition = fruit).
         recalled = _excite_recall(state, user_text, top_k=4)
+        _reinforce_recognised(state, recalled)
 
-        # Persist Craig's turn as an episode immediately so it becomes
-        # part of Chaver's memory even if the response fails.
+        # Persist the incoming turn immediately so it becomes memory even
+        # if the response fails.
         if state.hippocampus is not None and state.text_encoder is not None:
             try:
                 vec = state.text_encoder.encode(user_text)
                 joint = state.hippocampus.bind({"text": vec})
                 state.hippocampus.store_episode(
-                    key=f"turn:{turn}:craig",
+                    key=f"turn:{turn}:{speaker}",
                     content=user_text,
                     joint_vector=joint,
                     modalities=["text"],
-                    source="craig",
+                    source=speaker,
                     activation=0.7,
-                    meta={"turn": turn, "speaker": "craig"},
+                    meta={"turn": turn, "speaker": speaker},
                 )
             except Exception as exc:  # noqa: BLE001
-                print(f"[memory write error, craig turn] {exc}")
+                print(f"[memory write error, {speaker} turn] {exc}")
 
         # Generate response.
         try:
@@ -178,14 +225,13 @@ async def conversation_loop(
                     wm_context=state.working_memory.summary(),
                     purpose=(
                         f"conversation with Craig (turn {turn}; "
-                        f"{recalled} memories recalled)"
+                        f"{len(recalled)} memories recalled)"
                     ),
                     max_tokens=1024,
                 )
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"\n[language faculty error: {exc}]\n")
-            continue
+            return f"[language faculty error: {exc}]"
 
         state.working_memory.excite(
             key=f"chaver:turn:{turn}",
@@ -211,6 +257,42 @@ async def conversation_loop(
             except Exception as exc:  # noqa: BLE001
                 print(f"[memory write error, chaver turn] {exc}")
 
+        return reply
+
+
+async def conversation_loop(
+    state: ChaverState,
+    language: LanguageFaculty,
+    turn_counter,
+    turn_lock: asyncio.Lock,
+) -> None:
+    """Stdin conversation with Chaver — each turn becomes memory.
+
+    A thin transport over handle_turn: read a line, hand it to the shared
+    turn handler, print the reply. The turn counter and lock are shared
+    with the telnet server so both speak to one continuous Chaver.
+    """
+    print("\n[Speak with Chaver. Empty line + Enter to send. Ctrl+C to end.]\n")
+
+    loop = asyncio.get_running_loop()
+
+    while state.running:
+        try:
+            user_line = await loop.run_in_executor(None, sys.stdin.readline)
+        except (EOFError, KeyboardInterrupt):
+            state.running = False
+            break
+
+        if not user_line:
+            await asyncio.sleep(0.1)
+            continue
+
+        user_text = user_line.strip()
+        if not user_text:
+            continue
+
+        turn = next(turn_counter)
+        reply = await handle_turn(state, language, user_text, turn, turn_lock)
         print(f"\n[Chaver]: {reply}\n")
 
 
@@ -275,7 +357,15 @@ async def chaver_awake(
         top_k=3,
     )
     if recalled:
-        print(f"  [recalled {recalled} founding memories into working memory]")
+        print(
+            f"  [recalled {len(recalled)} founding memories into working memory]"
+        )
+
+    # Shared across every conversation transport (stdin + telnet) so they
+    # drive one continuous Chaver: a single monotonic turn id and a lock
+    # that serialises turns.
+    turn_counter = itertools.count(1)
+    turn_lock = asyncio.Lock()
 
     tasks = [
         asyncio.create_task(BehaviourModulator(state).run(), name="behaviour"),
@@ -285,7 +375,31 @@ async def chaver_awake(
         asyncio.create_task(Evaluation(state).run(), name="evaluation"),
         asyncio.create_task(wm_decay_task(state), name="wm_decay"),
         asyncio.create_task(consolidation_task(state), name="consolidation"),
+        asyncio.create_task(forget_task(state), name="forget"),
     ]
+
+    # Telnet chat front end — on by default, bound to localhost. Lets Craig
+    # (or a tagged-in collaborator) converse with the running Chaver over a
+    # telnet client, same mind as the stdin console. Disable with
+    # CHAVER_TELNET=0.
+    if os.environ.get("CHAVER_TELNET", "1") not in ("0", "false", "False", ""):
+        telnet_host = os.environ.get("CHAVER_TELNET_HOST", "127.0.0.1")
+        telnet_port = int(os.environ.get("CHAVER_TELNET_PORT", "8023"))
+        tasks.append(
+            asyncio.create_task(
+                serve_telnet(
+                    state,
+                    language,
+                    handle_turn,
+                    turn_counter,
+                    turn_lock,
+                    host=telnet_host,
+                    port=telnet_port,
+                ),
+                name="telnet",
+            )
+        )
+        print(f"  [telnet chat: telnet {telnet_host} {telnet_port}]")
 
     loop = asyncio.get_running_loop()
     for sig in (os_signal.SIGINT, os_signal.SIGTERM):
@@ -338,7 +452,7 @@ async def chaver_awake(
         print(f"\n[language faculty error at awakening: {exc}]\n")
 
     conversation_task = asyncio.create_task(
-        conversation_loop(state, language),
+        conversation_loop(state, language, turn_counter, turn_lock),
         name="conversation",
     )
     tasks.append(conversation_task)

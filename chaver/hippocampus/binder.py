@@ -36,6 +36,7 @@ class Episode:
     created_at: float
     consolidated_at: float | None = None
     activation: float = 0.5
+    strength: float = 1.0  # learned weight: fruit reinforces, disuse decays
     meta: dict = field(default_factory=dict)
 
 
@@ -100,7 +101,7 @@ class Hippocampus:
         cur = self.conn.execute(
             "INSERT INTO episodes "
             "(key, content, joint_vector, modalities, source, created_at, "
-            " activation, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " activation, strength, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 key,
                 content,
@@ -109,6 +110,7 @@ class Hippocampus:
                 source,
                 now,
                 activation,
+                1.0,  # new bindings start fully-standing; fruit/disuse move it
                 meta_str,
             ),
         )
@@ -158,7 +160,7 @@ class Hippocampus:
 
         cur = self.conn.execute(
             "SELECT id, key, content, joint_vector, modalities, source, "
-            "created_at, consolidated_at, activation, meta FROM episodes"
+            "created_at, consolidated_at, activation, strength, meta FROM episodes"
         )
         for row in cur.fetchall():
             vec = blob_to_vec(row[3])
@@ -177,7 +179,8 @@ class Hippocampus:
                 created_at=row[6],
                 consolidated_at=row[7],
                 activation=row[8],
-                meta=json.loads(row[9]) if row[9] else {},
+                strength=row[9],
+                meta=json.loads(row[10]) if row[10] else {},
             )
             results.append(RecallResult(episode, sim, from_cortical=False))
 
@@ -318,7 +321,7 @@ class Hippocampus:
 
         cur = self.conn.execute(
             "SELECT id, key, content, joint_vector, modalities, source, "
-            "created_at, consolidated_at, activation, meta FROM episodes"
+            "created_at, consolidated_at, activation, strength, meta FROM episodes"
         )
         for row in cur.fetchall():
             vec = blob_to_vec(row[3])
@@ -336,7 +339,8 @@ class Hippocampus:
                 created_at=row[6],
                 consolidated_at=row[7],
                 activation=row[8],
-                meta=json.loads(row[9]) if row[9] else {},
+                strength=row[9],
+                meta=json.loads(row[10]) if row[10] else {},
             )
             results.append(RecallResult(episode, score, from_cortical=False))
 
@@ -424,6 +428,94 @@ class Hippocampus:
 
         self.conn.commit()
         return consolidated
+
+    # ---- Learning ----------------------------------------------------
+    #
+    # The one thing the memory-and-learning core proved, folded into the
+    # real store: a binding that predicts well is reinforced; a binding
+    # never reinforced decays with disuse and is pruned. This — not raw
+    # storage — is what CLAUDE.md means by learning (relational binding
+    # carved by fruit, not a curve fit). Reinforcement is silent: no
+    # language-faculty call, no network. Fruit tests the binding
+    # (principle 6), and the fruit here is predictive recognition —
+    # a stored memory that resonates with a live cue bore fruit.
+
+    def reinforce(
+        self,
+        key: str,
+        delta: float,
+        cap: float = 5.0,
+        floor: float = 0.05,
+    ) -> float:
+        """Strengthen (or weaken) a binding by its fruit.
+
+        A memory that resonated with a live cue is strengthened so it
+        survives the forget pass; a misleading one can be weakened with a
+        negative delta. Strength biases survival, so proven bindings
+        persist and unproven ones fade. Returns the new strength (0.0 if
+        no such episode).
+
+        Args:
+            key: Episode key to reinforce.
+            delta: Signed strength change.
+            cap: Upper clamp — no binding grows without bound.
+            floor: Lower clamp — reinforcement never drops below this.
+        """
+        cur = self.conn.execute(
+            "SELECT strength FROM episodes WHERE key = ? LIMIT 1", (key,)
+        )
+        row = cur.fetchone()
+        if row is None:
+            return 0.0
+        new_strength = float(np.clip(row[0] + delta, floor, cap))
+        self.conn.execute(
+            "UPDATE episodes SET strength = ? WHERE key = ?",
+            (new_strength, key),
+        )
+        self.conn.commit()
+        return new_strength
+
+    def forget_pass(
+        self,
+        decay: float = 0.02,
+        floor: float = 0.05,
+        protect_consolidated: bool = True,
+    ) -> int:
+        """Slow disuse decay of the hippocampal index, then prune the dead.
+
+        Every episode's strength is multiplied down a little; bindings that
+        fall below the floor are dropped. This is decoherence, not
+        deletion — the index fades, but anything that mattered was either
+        reinforced (recalled and used) or consolidated (written to cortex)
+        first, and consolidated cortical fragments are left untouched. So
+        the durable self is preserved in cortex while the transient index
+        stops accreting noise.
+
+        Runs slowly (see the forget task in the heartbeat) so real
+        conversation memories have every chance to be recalled or
+        consolidated before they can decay out.
+
+        Args:
+            decay: Fractional strength lost per pass.
+            floor: Prune episodes whose strength falls below this.
+            protect_consolidated: If True, never prune an episode that has
+                already been written to cortex.
+
+        Returns:
+            Count of episodes pruned in this pass.
+        """
+        self.conn.execute(
+            "UPDATE episodes SET strength = strength * (1.0 - ?)", (decay,)
+        )
+        where = "strength < ?"
+        params: list = [floor]
+        if protect_consolidated:
+            where += " AND consolidated_at IS NULL"
+        cur = self.conn.execute(
+            f"DELETE FROM episodes WHERE {where}", params
+        )
+        self.conn.commit()
+        return cur.rowcount or 0
 
     # ---- Introspection ----------------------------------------------
 
