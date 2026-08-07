@@ -32,6 +32,7 @@ from chaver.cognitive.executive import Executive
 from chaver.cognitive.strategy import StrategyLayer
 from chaver.hippocampus.binder import Hippocampus, RecallResult
 from chaver.language.faculty import LanguageFaculty, LanguageRequest
+from chaver.net.telegram import serve_telegram
 from chaver.net.telnet import serve_telnet
 from chaver.persistence import close_db, open_db
 from chaver.sensory.text_encoder import TextEncoder
@@ -361,9 +362,9 @@ async def chaver_awake(
             f"  [recalled {len(recalled)} founding memories into working memory]"
         )
 
-    # Shared across every conversation transport (stdin + telnet) so they
-    # drive one continuous Chaver: a single monotonic turn id and a lock
-    # that serialises turns.
+    # Shared across every conversation transport (stdin + telnet + telegram)
+    # so they drive one continuous Chaver: a single monotonic turn id and a
+    # lock that serialises turns.
     turn_counter = itertools.count(1)
     turn_lock = asyncio.Lock()
 
@@ -400,6 +401,24 @@ async def chaver_awake(
             )
         )
         print(f"  [telnet chat: telnet {telnet_host} {telnet_port}]")
+
+    # Telegram chat transport — off by default. Enable with CHAVER_TELEGRAM=1
+    # and set CHAVER_TELEGRAM_TOKEN + CHAVER_TELEGRAM_ALLOWLIST in .env.
+    # Fails closed: unrecognised senders are silently ignored.
+    if os.environ.get("CHAVER_TELEGRAM", "0") in ("1", "true", "True"):
+        tasks.append(
+            asyncio.create_task(
+                serve_telegram(
+                    state,
+                    language,
+                    handle_turn,
+                    turn_counter,
+                    turn_lock,
+                ),
+                name="telegram",
+            )
+        )
+        print("  [telegram chat: transport starting]")
 
     loop = asyncio.get_running_loop()
     for sig in (os_signal.SIGINT, os_signal.SIGTERM):
