@@ -1,16 +1,32 @@
 [project]
 name = "chaver"
 version = "0.2.0"
-description = "Chaver — a Claude-shaped companion agent on the Catalyst cognitive architecture"
+description = "Chaver — a companion agent on the Catalyst cognitive architecture"
 requires-python = ">=3.11"
 authors = [
     { name = "Craig" },
 ]
+
+# Core dependencies — required on every deployment target
 dependencies = [
-    "anthropic>=0.40.0",
     "sentence-transformers>=2.7.0",
     "numpy>=1.24.0",
 ]
+
+# Optional backend dependencies — install the one matching your deployment
+#
+#   Droplet (Anthropic API):   pip install -e ".[anthropic]"
+#   Laptop  (Ollama):          pip install -e ".[ollama]"
+#   Both:                      pip install -e ".[anthropic,ollama]"
+#
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40.0"]
+ollama    = ["ollama>=0.3.0"]
+dev       = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+chaver      = "chaver.heartbeat:main"
+chaver-seed = "chaver.seed:main"
 
 [build-system]
 requires = ["setuptools>=61"]
