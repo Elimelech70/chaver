@@ -2,7 +2,7 @@
 name = "chaver"
 version = "0.2.0"
 description = "Chaver — a companion agent on the Catalyst cognitive architecture"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [
     { name = "Craig" },
 ]
