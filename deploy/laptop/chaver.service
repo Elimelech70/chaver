@@ -1,0 +1,37 @@
+# Systemd user service — laptop deployment (Ollama backend).
+#
+# Runs Chaver as an unprivileged per-user service: no root needed, survives
+# logout (requires `loginctl enable-linger <user>`), restarts on crash, and
+# starts automatically on boot. This is the actual unit in use on this
+# host (deployed at ~/.config/systemd/user/chaver.service) — paths below
+# are specific to this checkout; adjust WorkingDirectory/EnvironmentFile/
+# ExecStart if installing elsewhere.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/laptop/chaver.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now chaver.service
+#   loginctl enable-linger "$USER"   # persist across logout, no sudo required
+#
+# Manage:
+#   systemctl --user status chaver
+#   systemctl --user restart chaver   # picks up .env changes
+#   journalctl --user -u chaver -f
+
+[Unit]
+Description=Chaver companion agent
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/craig/chaver
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/craig/chaver/.env
+ExecStart=/home/craig/chaver/.venv/bin/chaver
+StandardInput=null
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
