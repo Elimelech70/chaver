@@ -6,9 +6,26 @@
 
 ---
 
+## Introduction
+
+This work's aim is moving from LLM to an architecture that better replicates the brain.  So I have researched AI architectures that are founded on neural science rather than a computational model that is flawed and can never get AI that fits in human size.
+
 ## 1. The Core Idea — A Resonant Field, Not a Pipeline
 
-Most AI systems are request-response machines: a question comes in, the LLM answers, state is discarded. Chaver is built on a different principle — the **Catalyst cognitive architecture** — which treats the mind as a continuously-running resonant field of concurrent processes sharing a common state, with the LLM used sparingly as a language organ rather than as the brain.
+Most AI systems are request-response machines: a question comes in, the LLM answers, state is discarded. Chaver is built on a different principle — the **Catalyst cognitive architecture** — which treats the mind as a continuously-running resonant field of concurrent processes sharing a common state. 
+
+This AI instance cannot exist without the LLM model as the source of knowledge due to my limitations, and inability to put all the training the AI industry currently invests in the LLM architecture.
+
+This AI instance focuses on memory and learning, but done in a measurable way, and also a way that can be reeplicated. 
+
+The analogy is a baby has the substrate on which consciousness can sit, but does not come with memory and learning because these have to form.  
+
+This AI architecture hybrided with LLM currently allows me to help create the substrate from which it can 'think'. Thinking can only operate in an architectural based on working memory that flows through a matrix of manifolds with memory recorded as related entities.
+
+It is also proposed that memory is not in one space but in many sensory cortix related by the hippocampus manifold. So perception will come as a result if working memeory as opposed to within a single sensory system.
+
+The working memory model has a prefrontal cortex that has attention, strategy, 
+
 
 This distinction is not cosmetic. In a pipeline, every question starts from scratch. In Chaver's field, five cognitive tasks are always running, shaping what is "ringing" in working memory before any word is spoken. By the time a user message arrives, Chaver's attention, strategy, and goal are already active — the LLM call lands into a prepared cognitive state, not an empty context.
 
