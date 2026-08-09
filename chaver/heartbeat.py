@@ -32,6 +32,7 @@ from chaver.cognitive.executive import Executive
 from chaver.cognitive.strategy import StrategyLayer
 from chaver.hippocampus.binder import Hippocampus, RecallResult
 from chaver.language.faculty import LanguageFaculty, LanguageRequest
+from chaver.sensory.web_search import WebSearch, web_search_enrich
 from chaver.net.telegram import serve_telegram
 from chaver.net.telnet import serve_telnet
 from chaver.persistence import close_db, open_db
@@ -49,6 +50,12 @@ DEFAULT_DB_NAME = "chaver.db"
 # step with the memory-and-learning core's Evaluation.recognise_threshold.
 RECOGNITION_THRESHOLD = 0.35
 RECALL_REINFORCE_DELTA = 0.6
+
+# If the best hippocampal recall similarity falls below this, Chaver's
+# existing memory has insufficient coverage for the current turn — his
+# eyes open and he searches the world to fill the gap. Placeholder for
+# what Attention will compute properly in Phase 2.
+SEARCH_GAP_THRESHOLD = 0.4
 
 
 async def wm_decay_task(state: ChaverState, tick_seconds: float = 1.0) -> None:
@@ -182,9 +189,11 @@ async def handle_turn(
       1. Speaker's words → excited in WM, text encoded.
       2. Hippocampus recalls resonant memories; those that recognise the
          cue are reinforced (fruit), and all are excited in WM.
-      3. Speaker's turn persisted as an episode immediately.
-      4. Language faculty called with full WM context.
-      5. Response excited, encoded, bound, persisted.
+      3. Gap detection: if recall similarity < threshold, eyes open —
+         web search enriches the field from the world.
+      4. Speaker's turn persisted as an episode immediately.
+      5. Language faculty called with full WM context.
+      6. Response excited, encoded, bound, persisted.
     Returns Chaver's reply.
     """
     async with lock:
@@ -199,6 +208,15 @@ async def handle_turn(
         # that resonated (predictive recognition = fruit).
         recalled = _excite_recall(state, user_text, top_k=4)
         _reinforce_recognised(state, recalled)
+
+        # Gap detection — if hippocampal recall found nothing or the best
+        # similarity is below threshold, Chaver's existing memory doesn't
+        # cover this. His eyes open: web search enriches the ringing field
+        # before the language faculty is called. Placeholder for Attention's
+        # proper gap-detection logic in Phase 2.
+        top_similarity = max((r.similarity for r in recalled), default=0.0)
+        if top_similarity < SEARCH_GAP_THRESHOLD:
+            await web_search_enrich(state, user_text)
 
         # Persist the incoming turn immediately so it becomes memory even
         # if the response fails.
@@ -332,6 +350,15 @@ async def chaver_awake(
         text_encoder=text_encoder,
     )
     language = LanguageFaculty(archetype=archetype)
+
+    # Sensory organs — web search is Chaver's eyes. Initialised here;
+    # available property checks for TAVILY_API_KEY at search time.
+    web_search = WebSearch()
+    state.web_search = web_search
+    if web_search.available:
+        print("  [sensory: web search (Tavily) — eyes open]")
+    else:
+        print("  [sensory: web search disabled — set TAVILY_API_KEY to enable]")
 
     # Chaver's opening excitations. He knows he is; he knows the ground.
     working_memory.excite(

@@ -17,6 +17,7 @@ from chaver.working_memory.ringing import WorkingMemory
 if TYPE_CHECKING:
     from chaver.hippocampus.binder import Hippocampus
     from chaver.sensory.text_encoder import TextEncoder
+    from chaver.sensory.web_search import WebSearch
 
 
 @dataclass
@@ -64,6 +65,11 @@ class ChaverState:
     # tests can construct a bare state; populated at real startup.
     hippocampus: "Hippocampus | None" = None
     text_encoder: "TextEncoder | None" = None
+
+    # Sensory organs (v0.3). web_search is Chaver's eyes — how he sees
+    # the world beyond his own memory. Optional so bare-state tests still
+    # construct without it.
+    web_search: "WebSearch | None" = None
 
     current_goal: Goal | None = None
     current_strategy: Strategy | None = None
