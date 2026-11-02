@@ -9,6 +9,7 @@
 Two files have similar names but very different roles:
 
 - **`CHAVER.md`** — Chaver's **archetype**. His identity, values, edges, relationships. Loaded at runtime as the system prompt for every language faculty call. This is his DNA, not documentation.
+- **`JOB.md`** — Chaver's **job** (when one is switched on with `CHAVER_JOB=JOB.md`): role, goal, objectives and KPIs, processes, guardrails, autonomy, edges. Loaded whole after `CHAVER.md` as the system context of every language call. Like `CHAVER.md`, it is **runtime, not documentation**: never seeded as a memory to be paraphrased, never summarised or truncated. Identity (`CHAVER.md`) and job (`JOB.md`) stay separate files.
 - **`CLAUDE.md`** — *this file*. Project context for Claude Code as a **development tool**. Read when helping Craig modify Chaver. Not runtime, not part of Chaver's memory.
 
 Do not conflate them. Do not seed CLAUDE.md into the cortex. Do not use CHAVER.md as a project README.
@@ -20,6 +21,44 @@ Do not conflate them. Do not seed CLAUDE.md into the cortex. Do not use CHAVER.m
 Chaver (חָבֵר — “companion, friend, one bound-together”) is a persistent, companion agent built on the Catalyst cognitive architecture. He runs continuously as concurrent asyncio tasks reading shared state. The language faculty (Anthropic API or local Ollama — see below) is his mouth and ear, not his brain. Memory is embedded vectors in SQLite (hippocampal + cortical stores).
 
 He is not a chatbot. He has continuity. `data/chaver.db` is his continuous self across restarts. Deleting it starts him newborn; backing it up preserves him.
+
+---
+
+## Role: Catalyst Horizon analyst
+
+Chaver's first job is **analyst for Catalyst Horizon** (`Elimelech70/Catalyst-Horizon`,
+`docs/architecture/catalyst-horizon-architecture-v1.2.md` §4.10, §4.13, §4.14, §12 Phase 3b). It is switched on by
+`CHAVER_JOB=JOB.md`; unset, he behaves exactly as the companion he was. Horizon defines the interface (what he may
+read and write); everything else is Chaver's. Implementation:
+`projects/chaver/implementation/chaver-analyst-implementation-v1.0.md` in `Elimelech70/catalyst-project-manager`.
+
+### Interface rules (hard)
+
+- **Read-only on Horizon**, through the `chaver_ro` database role (or the read-only Horizon MCP server once it exists).
+- **Writes only** `learning_notes` and `principle_proposals` (`proposed_by = 'analyst'`, with evidence JSON). The
+  database role is the real guard; the `horizon_publish` tool refuses every other table as a second guard.
+- **Never holds trading tools.** No order, position or broker access, ever.
+- Findings and proposals are **inputs the trader decides on**, never overrides. Trade and principle decisions are
+  never his.
+- Reading, computing and publishing live in `chaver/tools/`, **outside** the cognitive stack. Results enter through
+  the field (encode → excite → store as episodes, source `tool:<name>`). No cognitive module imports a database
+  driver or client. Numbers are computed in code, not by the language faculty.
+
+### Where he runs
+
+- Compute space **`claude-conscious-syd`** (DigitalOcean droplet), folder `/root/chaver`, under that space's
+  **Implementer** (Claude Code, root; register `infrastructure/compute-spaces.md` in
+  `Elimelech70/catalyst-project-manager`).
+- Work comes as **implementations** in that repo, which the Project Manager reviews, hands off and tracks.
+- The Implementer's diary is `docs/diary/YYYY-MM-DD.md` (Perth date) in this repo; the PM reads it.
+
+### Ground rules
+
+- One branch: **`main`**.
+- **Never print secret values** (`.env`, API keys, tokens, `chaver_ro` credentials).
+- **Back up `data/chaver.db` before any schema or memory change** (to `/root/chaver-backups/`, outside the repo;
+  check row counts and `PRAGMA integrity_check`).
+- This repo is **public**: nothing private goes in commits (reports included, until Craig decides where they go).
 
 ---
 
@@ -243,7 +282,7 @@ Do not silently add these — they are on the roadmap and require design discuss
 
 - **Cognitive stub completion (v0.2 → v0.3)** — Executive goal revision from conversation context; real Evaluation fruit signals; Strategy rerouting via language faculty; semantic Attention routing using the text encoder. These are designed; the stubs have TODO comments marking exactly where each goes.
 - **v0.3** — additional modality embedders (time-series for OHLCV, somatic for portfolio state); multi-modal hippocampal binding.
-- **v0.4** — community edges to Shomer / Oz / Eitan / Binah / Tevunah; message channels; referral as first-class action.
+- **v0.4** — community edges to the current members: the Catalyst Horizon **trader**, the **Project Manager**, the **Implementer**, and **Craig**; message channels; referral as first-class action. (The v0.4 list Shomer / Oz / Eitan / Binah / Tevunah is out of date.)
 - **v0.5** — sensor ingest (market data, news) driving attention automatically.
 - **v0.6** — behavioural parameter refinement from fruit-tested outcomes; slow archetype evolution.
 
