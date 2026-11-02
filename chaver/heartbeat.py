@@ -24,6 +24,7 @@ import signal as os_signal
 import sys
 from pathlib import Path
 
+from chaver.archetype.job import job_path_from_env, load_job
 from chaver.archetype.loader import load_archetype
 from chaver.cognitive.attention import Attention
 from chaver.cognitive.behaviour import BehaviourModulator
@@ -329,7 +330,10 @@ async def chaver_awake(
     """
     print("\n[Chaver awakening...]")
 
-    archetype = load_archetype(chaver_md_path)
+    job_path = job_path_from_env(chaver_md_path.parent)
+    job = load_job(job_path) if job_path is not None else None
+    archetype = load_archetype(chaver_md_path, job=job)
+    print(f"  [job: {job.path.name if job else 'none (companion)'}]")
 
     print("  [loading text encoder — first run may download model]")
     text_encoder = TextEncoder()
@@ -350,6 +354,7 @@ async def chaver_awake(
         text_encoder=text_encoder,
     )
     language = LanguageFaculty(archetype=archetype)
+    print(f"  [language: {language.backend_label}]")
 
     # Sensory organs — web search is Chaver's eyes. Initialised here;
     # available property checks for TAVILY_API_KEY at search time.

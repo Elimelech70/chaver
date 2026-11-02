@@ -8,6 +8,7 @@ in Chaver's own voice.
 
 from pathlib import Path
 
+from chaver.archetype.job import Job
 from chaver.archetype.model import (
     Archetype,
     BehaviouralProfile,
@@ -16,7 +17,7 @@ from chaver.archetype.model import (
 )
 
 
-def load_archetype(chaver_md_path: Path) -> Archetype:
+def load_archetype(chaver_md_path: Path, job: Job | None = None) -> Archetype:
     """Load Chaver's archetype from CHAVER.md.
 
     For v0, the CHAVER.md text is preserved whole as identity_text (used
@@ -27,6 +28,8 @@ def load_archetype(chaver_md_path: Path) -> Archetype:
 
     Args:
         chaver_md_path: Path to CHAVER.md file.
+        job: Chaver's job (from JOB.md), or None. When given, own domain, own edges
+            and neighbours come from the job; otherwise the companion defaults below.
 
     Returns:
         Archetype instance ready for use by the cognitive stack.
@@ -91,6 +94,13 @@ def load_archetype(chaver_md_path: Path) -> Archetype:
         ],
     )
 
+    if job is not None:
+        edge_map = EdgeMap(
+            own_domain=job.own_domain or edge_map.own_domain,
+            own_edges=list(job.own_edges),
+            neighbours=list(job.neighbours),
+        )
+
     return Archetype(
         name="Chaver",
         identity_text=identity_text,
@@ -113,4 +123,5 @@ def load_archetype(chaver_md_path: Path) -> Archetype:
             "Binah": "sister; analyst, understanding",
             "Tevunah": "sister; analyst, discernment",
         },
+        job=job,
     )

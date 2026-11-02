@@ -37,14 +37,22 @@ class Executive:
         indicate the intention should change.
         """
         if self.state.current_goal is None:
-            self.state.current_goal = Goal(
-                intention=(
-                    "walk alongside Craig; remember faithfully; "
-                    "refer at edges; bring what I see honestly"
-                ),
-                context="foundational purpose from archetype",
-                set_at=time.time(),
-            )
+            job = self.state.archetype.job
+            if job is not None and job.goal:
+                self.state.current_goal = Goal(
+                    intention=job.goal,
+                    context=f"job goal from {job.path.name}",
+                    set_at=time.time(),
+                )
+            else:
+                self.state.current_goal = Goal(
+                    intention=(
+                        "walk alongside Craig; remember faithfully; "
+                        "refer at edges; bring what I see honestly"
+                    ),
+                    context="foundational purpose from archetype",
+                    set_at=time.time(),
+                )
             self.state.working_memory.excite(
                 key="goal:foundational",
                 content=self.state.current_goal.intention,

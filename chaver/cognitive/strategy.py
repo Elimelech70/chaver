@@ -38,6 +38,22 @@ class StrategyLayer:
         if self.state.current_goal is None:
             return
 
+        job = self.state.archetype.job
+        if self.state.current_strategy is None and job is not None and job.processes:
+            self.state.current_strategy = StrategyState(
+                approach=f"carry out my job's processes ({job.path.name})",
+                steps=list(job.processes),
+                attention_targets=["job_processes", "current_conversation", "recent_signals"],
+                set_at=time.time(),
+            )
+            self.state.working_memory.excite(
+                key="strategy:job",
+                content=self.state.current_strategy.approach,
+                source="strategy",
+                strength=0.5,
+            )
+            return
+
         if self.state.current_strategy is None:
             self.state.current_strategy = StrategyState(
                 approach="attend, remember, reflect, refer",

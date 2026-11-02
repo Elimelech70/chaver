@@ -210,7 +210,7 @@ class LanguageFaculty:
             )
 
         return await self._backend.generate(
-            system_prompt=self.archetype.identity_text,
+            system_prompt=self.archetype.system_context,
             user_content=user_content,
             max_tokens=request.max_tokens,
         )

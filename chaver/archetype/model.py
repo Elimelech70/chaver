@@ -6,7 +6,13 @@ It is not a config file. It is DNA. Archetype changes only through
 sustained fruit-tested experience — sanctification-slow — not per-cycle.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from chaver.archetype.job import Job
 
 
 @dataclass
@@ -64,3 +70,15 @@ class Archetype:
     edge_map: EdgeMap
     ground_convictions: list[str] = field(default_factory=list)
     relationships: dict[str, str] = field(default_factory=dict)
+    job: Job | None = None  # set when CHAVER_JOB names a JOB.md; None = no job
+
+    @property
+    def system_context(self) -> str:
+        """System context for every language call.
+
+        CHAVER.md verbatim, then JOB.md verbatim when a job is loaded. Same text every
+        call: never summarised, truncated, or altered per call (design principle 3).
+        """
+        if self.job is None:
+            return self.identity_text
+        return f"{self.identity_text}\n\n---\n\n{self.job.text}"
