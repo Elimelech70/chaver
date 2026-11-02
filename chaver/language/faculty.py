@@ -4,6 +4,9 @@ Supports multiple LLM backends, selected by environment variable:
 
     CHAVER_BACKEND=anthropic   →  Anthropic API (droplet / cloud)
     CHAVER_BACKEND=ollama      →  local Ollama (laptop)
+    CHAVER_BACKEND=openai_compat → any OpenAI-compatible endpoint (OpenRouter,
+                                   LiteLLM, DeepSeek, ...): CHAVER_BASE_URL,
+                                   CHAVER_API_KEY, CHAVER_MODEL (all required)
 
 Within each backend, CHAVER_MODEL selects the specific model:
 
@@ -42,6 +45,7 @@ CHAVER_BACKEND = os.environ.get("CHAVER_BACKEND", "anthropic").lower().strip()
 _DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-sonnet-5",
     "ollama": "qwen3",
+    "openai_compat": "",  # no default: CHAVER_MODEL is required (Craig chooses)
 }
 
 if CHAVER_BACKEND not in _DEFAULT_MODELS:
@@ -154,10 +158,69 @@ class _OllamaBackend(_Backend):
         return response["message"]["content"].strip()
 
 
+class _OpenAICompatBackend(_Backend):
+    """Any OpenAI-compatible chat-completions endpoint (another developer's model).
+
+    Covers OpenRouter, LiteLLM, DeepSeek and others. Configured only by environment:
+        CHAVER_BASE_URL   e.g. https://openrouter.ai/api/v1  (".../chat/completions" is appended)
+        CHAVER_API_KEY    bearer token (never logged)
+        CHAVER_MODEL      the provider's model id
+    """
+
+    def __init__(self, model: str) -> None:
+        import httpx  # optional dep (extra: openai_compat)
+
+        base_url = os.environ.get("CHAVER_BASE_URL", "").strip().rstrip("/")
+        api_key = os.environ.get("CHAVER_API_KEY", "").strip()
+        missing = [n for n, v in (("CHAVER_BASE_URL", base_url),
+                                  ("CHAVER_API_KEY", api_key),
+                                  ("CHAVER_MODEL", model)) if not v]
+        if missing:
+            raise RuntimeError(
+                "CHAVER_BACKEND=openai_compat but these are not set: "
+                + ", ".join(missing) + ". Set them in .env before starting Chaver."
+            )
+        self._httpx = httpx
+        self._url = f"{base_url}/chat/completions"
+        self._client = httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=httpx.Timeout(120.0, connect=10.0),
+        )
+        self._model = model
+
+    @property
+    def label(self) -> str:
+        return f"openai_compat/{self._model}"
+
+    async def generate(self, system_prompt: str, user_content: str, max_tokens: int) -> str:
+        payload = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+        }
+        try:
+            response = await self._client.post(self._url, json=payload)
+        except self._httpx.HTTPError as exc:
+            raise RuntimeError(f"openai_compat: request failed: {type(exc).__name__}") from exc
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"openai_compat: HTTP {response.status_code}: {response.text[:200]}"
+            )
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("openai_compat: unexpected response shape") from exc
+        return (content or "").strip()
+
+
 # Registry — add new backends here as the project grows
 BACKENDS: dict[str, type[_Backend]] = {
-    "anthropic": _AnthropicBackend,
-    "ollama":    _OllamaBackend,
+    "anthropic":     _AnthropicBackend,
+    "ollama":        _OllamaBackend,
+    "openai_compat": _OpenAICompatBackend,
 }
 
 
