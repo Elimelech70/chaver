@@ -239,6 +239,10 @@ from pathlib import Path
 print('ok')
 "
 
+# Tests (job, backend, tools). Database tests need a THROWAWAY Postgres (see tests/test_tools.py):
+.venv/bin/python -m pytest -q tests
+CHAVER_TEST_PG_HOST=<socket dir> CHAVER_TEST_HORIZON_SQL=<Catalyst-Horizon>/sql .venv/bin/python -m pytest -q tests
+
 # Show current backend/model
 python3 -c "from chaver.language.faculty import CHAVER_BACKEND, CHAVER_MODEL; print(CHAVER_BACKEND, CHAVER_MODEL)"
 
@@ -291,7 +295,14 @@ Also deferred:
 - **Episodic pruning after consolidation** — episodic trace persists after consolidation (over-remembering is safer). Add pruning when `data/chaver.db` growth becomes a concern.
 - **Multi-line stdin input** — current loop is one message per line. UX improvement, not architectural.
 - **MCP server exposure** — planned for community integration, not v0.2.
-- **Additional Ollama backends** (OpenAI-compatible, Groq, etc.) — add a new `_Backend` subclass in `faculty.py` when needed.
+- **Other backends** (Groq, etc.) — add a new `_Backend` subclass in `faculty.py` when needed.
+
+## Built for the analyst job (analyst implementation M3–M5, 03/11/2026)
+
+- **Job file** — `JOB.md` + `chaver/archetype/job.py`; `CHAVER_JOB=JOB.md` switches it on (unset = companion, unchanged). `JOB.md` is a **draft for Craig**; so is `docs/drafts/CHAVER.md-edges-relationships.diff` (not applied). Neither runs until Craig approves.
+- **OpenAI-compatible backend** — `CHAVER_BACKEND=openai_compat` with `CHAVER_BASE_URL`, `CHAVER_API_KEY`, `CHAVER_MODEL` (OpenRouter, LiteLLM, DeepSeek, …). Default stays `anthropic` until Craig chooses the model.
+- **Tools layer** — `chaver/tools/`: `horizon_read` (named read-only queries), `horizon_publish` (only `learning_notes` and `principle_proposals`, `proposed_by='analyst'`, evidence required), `report_write` (`reports/analyst/YYYY-MM-DD.md`, push off unless `CHAVER_REPORT_PUSH=1`). Results enter through `chaver.tools.field.ingest`. Horizon tools register only when `CHAVER_HORIZON_DSN` is set. Only `chaver/tools/` may import a database driver (a test enforces it).
+- **Not yet built:** the analyst processes on a schedule and fruit signals (M6), the droplet service (M7), the trial (M8). They wait on Horizon `sql/010`, `chaver_ro` access, and Craig's approvals.
 
 ---
 

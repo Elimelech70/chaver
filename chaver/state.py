@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from chaver.hippocampus.binder import Hippocampus
     from chaver.sensory.text_encoder import TextEncoder
     from chaver.sensory.web_search import WebSearch
+    from chaver.tools.base import ToolRegistry
 
 
 @dataclass
@@ -70,6 +71,10 @@ class ChaverState:
     # the world beyond his own memory. Optional so bare-state tests still
     # construct without it.
     web_search: "WebSearch | None" = None
+
+    # Tools (analyst M5): Chaver's hands, outside the cognitive stack. Strategy
+    # steps call them; results enter through chaver.tools.field.ingest.
+    tools: "ToolRegistry | None" = None
 
     current_goal: Goal | None = None
     current_strategy: Strategy | None = None

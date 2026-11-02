@@ -34,6 +34,7 @@ from chaver.cognitive.strategy import StrategyLayer
 from chaver.hippocampus.binder import Hippocampus, RecallResult
 from chaver.language.faculty import LanguageFaculty, LanguageRequest
 from chaver.sensory.web_search import WebSearch, web_search_enrich
+from chaver.tools.registry import tools_from_env
 from chaver.net.telegram import serve_telegram
 from chaver.net.telnet import serve_telnet
 from chaver.persistence import close_db, open_db
@@ -360,6 +361,8 @@ async def chaver_awake(
     # available property checks for TAVILY_API_KEY at search time.
     web_search = WebSearch()
     state.web_search = web_search
+    state.tools = tools_from_env()
+    print(f"  [tools: {', '.join(state.tools.names)}]")
     if web_search.available:
         print("  [sensory: web search (Tavily) — eyes open]")
     else:
